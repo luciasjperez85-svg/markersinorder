@@ -443,17 +443,14 @@ function hexToRgb(hex) {
  * Convert RGB to XYZ color space
  */
 function rgbToXyz(r, g, b) {
-  // Normalize to 0-1
   r = r / 255;
   g = g / 255;
   b = b / 255;
 
-  // Apply gamma correction
   r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
   g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
   b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
 
-  // Convert to XYZ using sRGB matrix
   return {
     x: r * 0.4124564 + g * 0.3575761 + b * 0.1804375,
     y: r * 0.2126729 + g * 0.7151522 + b * 0.0721750,
@@ -465,7 +462,6 @@ function rgbToXyz(r, g, b) {
  * Convert XYZ to CIELAB
  */
 function xyzToLab(x, y, z) {
-  // D65 white point
   const refX = 0.95047;
   const refY = 1.00000;
   const refZ = 1.08883;
@@ -498,7 +494,8 @@ export function hexToLab(hex) {
 }
 
 /**
- * Calculate hue, chroma from CIELAB a*, b*
+ * Calculate hue and chroma from CIELAB a*, b*
+ * CIELAB hue: 0° = red (+a), 90° = yellow (+b), 180° = green (-a), 270° = blue (-b)
  */
 function getLabHueChroma(a, b) {
   const chroma = Math.sqrt(a * a + b * b);
@@ -508,112 +505,124 @@ function getLabHueChroma(a, b) {
 }
 
 /**
- * Color group definitions for chromatic ordering
- */
-const COLOR_GROUPS = {
-  YELLOW: 0,
-  YELLOW_ORANGE: 1,
-  ORANGE: 2,
-  RED: 3,
-  PINK_MAGENTA: 4,
-  VIOLET_PURPLE: 5,
-  BLUE: 6,
-  TURQUOISE: 7,
-  GREEN: 8,
-  YELLOW_GREEN: 9,
-  BROWN: 10,
-  SKIN_TONE: 11,
-  WARM_GRAY: 12,
-  COOL_GRAY: 13,
-  BLACK_NEUTRAL: 14
-};
-
-/**
  * Classify a color into its chromatic group
+ * Order: Amarillos → Amarillos-naranja → Naranjas → Rojos → Rosas/Magentas → 
+ *        Violetas → Azules → Turquesas → Verdes → Amarillos-verdes → 
+ *        Marrones → Tonos piel → Grises cálidos → Grises fríos → Negros/neutros
  */
 function classifyColor(lab, hue, chroma) {
-  const { L, a, b } = lab;
+  const { L, a, b: labB } = lab;
   
-  // Threshold for neutral colors (low chroma)
-  const NEUTRAL_THRESHOLD = 8;
-  const LOW_CHROMA_THRESHOLD = 15;
-  
-  // Detect neutrals (very low chroma)
-  if (chroma < NEUTRAL_THRESHOLD) {
-    if (L < 15) return COLOR_GROUPS.BLACK_NEUTRAL;
-    // Warm vs cool gray based on a* and b*
-    if (a > 0 || b > 0) return COLOR_GROUPS.WARM_GRAY;
-    return COLOR_GROUPS.COOL_GRAY;
+  // ===== NEUTRALS (very low chroma) =====
+  if (chroma < 5) {
+    if (L < 20) return 14; // Negro/neutros extremos
+    if (a > 0 || labB > 0) return 12; // Grises cálidos
+    return 13; // Grises fríos
   }
   
-  // Detect skin tones: hue between yellow-orange (20-50°), high L*, medium-low chroma
-  if (hue >= 20 && hue <= 50 && L >= 55 && chroma >= 10 && chroma <= 35) {
-    return COLOR_GROUPS.SKIN_TONE;
+  // ===== LOW CHROMA SPECIAL CASES =====
+  if (chroma < 20) {
+    // Grises con algo de color
+    if (L < 25) return 14; // Muy oscuro = negro
+    if (L > 75 && chroma < 10) {
+      if (a > 0 || labB > 0) return 12; // Gris cálido claro
+      return 13; // Gris frío claro
+    }
   }
   
-  // Detect browns: orange-ish hue, low lightness, medium chroma
-  if (hue >= 15 && hue <= 50 && L < 50 && chroma < 40) {
-    return COLOR_GROUPS.BROWN;
+  // ===== BROWNS: orange-red hue, low-medium L, low-medium chroma =====
+  if (hue >= 30 && hue <= 70 && L < 55 && L > 15 && chroma < 50) {
+    return 10; // Marrones
   }
   
-  // Classify by hue angle
-  if (hue >= 80 && hue < 105) return COLOR_GROUPS.YELLOW;
-  if (hue >= 60 && hue < 80) return COLOR_GROUPS.YELLOW_ORANGE;
-  if (hue >= 35 && hue < 60) return COLOR_GROUPS.ORANGE;
-  if (hue >= 0 && hue < 35) return COLOR_GROUPS.RED;
-  if (hue >= 345 && hue <= 360) return COLOR_GROUPS.RED;
-  if (hue >= 310 && hue < 345) return COLOR_GROUPS.PINK_MAGENTA;
-  if (hue >= 270 && hue < 310) return COLOR_GROUPS.VIOLET_PURPLE;
-  if (hue >= 220 && hue < 270) return COLOR_GROUPS.BLUE;
-  if (hue >= 170 && hue < 220) return COLOR_GROUPS.TURQUOISE;
-  if (hue >= 130 && hue < 170) return COLOR_GROUPS.GREEN;
-  if (hue >= 105 && hue < 130) return COLOR_GROUPS.YELLOW_GREEN;
+  // ===== SKIN TONES: orange-yellow hue, high L, low-medium chroma =====
+  if (hue >= 40 && hue <= 80 && L >= 60 && L <= 85 && chroma >= 15 && chroma <= 40) {
+    return 11; // Tonos piel
+  }
   
-  return COLOR_GROUPS.GREEN; // Default fallback
+  // ===== CHROMATIC COLORS BY HUE =====
+  // CIELAB hue wheel: 0°=red, 90°=yellow, 180°=green, 270°=blue
+  
+  // Amarillos (85° - 100°)
+  if (hue >= 85 && hue < 100) return 0;
+  
+  // Amarillos-naranja (70° - 85°)
+  if (hue >= 70 && hue < 85) return 1;
+  
+  // Naranjas (45° - 70°)
+  if (hue >= 45 && hue < 70) return 2;
+  
+  // Rojos (0° - 45° y 345° - 360°)
+  if ((hue >= 0 && hue < 45) || (hue >= 345 && hue <= 360)) return 3;
+  
+  // Rosas / Magentas (310° - 345°)
+  if (hue >= 310 && hue < 345) return 4;
+  
+  // Violetas / Púrpuras (270° - 310°)
+  if (hue >= 270 && hue < 310) return 5;
+  
+  // Azules (220° - 270°)
+  if (hue >= 220 && hue < 270) return 6;
+  
+  // Turquesas (170° - 220°)
+  if (hue >= 170 && hue < 220) return 7;
+  
+  // Verdes (130° - 170°)
+  if (hue >= 130 && hue < 170) return 8;
+  
+  // Amarillos-verdes (100° - 130°)
+  if (hue >= 100 && hue < 130) return 9;
+  
+  return 8; // Default: verde
 }
 
 /**
- * Sort colors using advanced chromatic ordering (CIELAB-based)
- * Groups colors by type, then sorts within each group by hue, lightness, chroma
- * @param {Array} colors - Array of color objects with hex property
- * @returns {Array} - Sorted array of colors
+ * Sort colors using CIELAB chromatic ordering
+ * Groups by color family, then sorts within each group by:
+ * 1. Hue (tono)
+ * 2. Lightness (L*) - claro a oscuro
+ * 3. Chroma (C*) - saturado a apagado
  */
 export function sortColorsChromatic(colors) {
-  // Calculate CIELAB values for each color
-  const colorsWithLab = colors.map(color => {
-    const lab = hexToLab(color.hex);
-    const { hue, chroma } = getLabHueChroma(lab.a, lab.b);
-    const group = classifyColor(lab, hue, chroma);
-    
-    return {
-      ...color,
-      lab,
-      hue,
-      chroma,
-      group
-    };
+  if (!Array.isArray(colors) || colors.length === 0) return [];
+  
+  const colorsWithData = colors.map(color => {
+    try {
+      const lab = hexToLab(color.hex);
+      const { hue, chroma } = getLabHueChroma(lab.a, lab.b);
+      const group = classifyColor(lab, hue, chroma);
+      
+      return {
+        ...color,
+        _lab: lab,
+        _hue: hue,
+        _chroma: chroma,
+        _group: group
+      };
+    } catch (e) {
+      return { ...color, _lab: { L: 50, a: 0, b: 0 }, _hue: 0, _chroma: 0, _group: 14 };
+    }
   });
   
-  // Sort by group first, then by hue, lightness (descending), chroma (descending)
-  return colorsWithLab.sort((a, b) => {
-    // Primary: sort by group
-    if (a.group !== b.group) {
-      return a.group - b.group;
+  return colorsWithData.sort((a, b) => {
+    // 1. Por grupo
+    if (a._group !== b._group) {
+      return a._group - b._group;
     }
     
-    // Secondary: sort by hue within group
-    const hueDiff = a.hue - b.hue;
-    if (Math.abs(hueDiff) > 5) {
+    // 2. Por tono (hue) dentro del grupo
+    const hueDiff = a._hue - b._hue;
+    if (Math.abs(hueDiff) > 3) {
       return hueDiff;
     }
     
-    // Tertiary: sort by lightness (light to dark)
-    const lightnessDiff = b.lab.L - a.lab.L;
-    if (Math.abs(lightnessDiff) > 3) {
-      return lightnessDiff;
+    // 3. Por claridad (L*): de claro a oscuro
+    const lightDiff = b._lab.L - a._lab.L;
+    if (Math.abs(lightDiff) > 2) {
+      return lightDiff;
     }
     
-    // Quaternary: sort by chroma (saturated to muted)
-    return b.chroma - a.chroma;
+    // 4. Por saturación (chroma): de más saturado a más apagado
+    return b._chroma - a._chroma;
   });
 }
